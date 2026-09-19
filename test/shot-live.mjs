@@ -10,7 +10,7 @@ const send=(m,p={})=>new Promise(res=>{const i=++id;pend.set(i,res);ws.send(JSON
 const ev=async e=>(await send('Runtime.evaluate',{expression:e,returnByValue:true,awaitPromise:true})).result.value;
 const s=ms=>new Promise(r=>setTimeout(r,ms));
 await send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:2,mobile:false});
-await send('Page.navigate',{url:'https://naukhangreenwin.github.io/checkers/'});
+await send('Page.navigate',{url:'https://naukhangreenwin.github.io/sana-checkers/'});
 await s(2500);
 // play an engaging mid-game position in two-player mode, then select a piece
 await ev('document.getElementById("menuBtn").click()'); await s(400);

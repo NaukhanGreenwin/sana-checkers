@@ -1,10 +1,10 @@
-# Checkers
+# Sana
 
-A polished, zero-dependency checkers game (English draughts / American checkers) that runs entirely in the browser.
+A checkers game for Sana. Play at https://naukhangreenwin.github.io/sana-checkers/.
 
-**▶ Play at https://naukhangreenwin.github.io/checkers/**
+Zero-dependency English draughts (American checkers) that runs entirely in the browser.
 
-![Checkers](assets/og.png)
+![Sana](assets/og.png)
 
 ## Features
 

@@ -1,7 +1,7 @@
 {
-  "name": "Checkers — English Draughts",
-  "short_name": "Checkers",
-  "description": "Play English draughts against the computer or a friend.",
+  "name": "Sana · Checkers",
+  "short_name": "Sana",
+  "description": "A checkers game for Sana. Play English draughts against the computer or a friend.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

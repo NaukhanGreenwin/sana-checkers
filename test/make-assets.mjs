@@ -167,9 +167,9 @@ const GOLD = [226, 178, 84];
     }
     return x;
   };
-  text('CHECKERS', 80, 214, 12, [244, 242, 240]);
+  text('SANA', 80, 214, 12, [244, 242, 240]);
   rect(c, 80, 330, 132, 5, [226, 160, 76]);
-  text('ENGLISH DRAUGHTS', 80, 378, 5, [172, 169, 176]);
+  text('CHECKERS', 80, 378, 5, [172, 169, 176]);
 
   fs.writeFileSync('assets/og.png', png(W, H, c.buf));
   console.log('og.png 1200x630');

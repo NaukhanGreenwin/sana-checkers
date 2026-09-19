@@ -92,7 +92,7 @@ console.log('\n[desktop 1440x900]');
 await viewport(1440, 900, 2);
 await load(URL_BASE);
 
-ok('title set', (await evaluate('document.title')).includes('Checkers'));
+ok('title set', (await evaluate('document.title')).includes('Sana'));
 ok('32 dark squares rendered', await evaluate('document.querySelectorAll(".sq--dark").length') === 32);
 ok('32 light squares rendered', await evaluate('document.querySelectorAll(".sq--light").length') === 32);
 ok('24 pieces rendered', await evaluate('document.querySelectorAll(".piece").length') === 24);
