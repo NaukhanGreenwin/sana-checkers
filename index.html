@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Sana · Checkers — Play English Draughts vs Computer or a Friend</title>
-<meta name="description" content="Sana — a polished, free checkers game. Play English draughts against three computer difficulties or pass-and-play locally. Mandatory captures, multi-jumps, kings, move history. No downloads.">
+<title>Sana · Checkers — Play English Draughts Online, vs Computer or a Friend</title>
+<meta name="description" content="Sana — a polished, free checkers game. Play English draughts against three computer difficulties, pass-and-play locally, or online with a friend over a shareable room link. Mandatory captures, multi-jumps, kings, move history. No downloads.">
 <meta name="theme-color" content="#181a1f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f4f4f6" media="(prefers-color-scheme: light)">
 <meta name="color-scheme" content="dark light">
@@ -38,6 +38,11 @@
       <span class="brand__sub">Checkers · English draughts</span>
     </div>
 
+    <p class="netpill" id="netPill" data-show="0" data-state="idle" role="status" aria-live="polite">
+      <span class="netpill__dot" aria-hidden="true"></span>
+      <span class="netpill__text" id="netPillText"></span>
+    </p>
+
     <button type="button" class="btn btn--icon" id="themeBtn" aria-label="Switch to light theme">
       <svg class="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>
@@ -56,6 +61,13 @@
           Thinking
           <span class="thinking__dot"></span><span class="thinking__dot"></span><span class="thinking__dot"></span>
         </span>
+      </div>
+
+      <div class="netbanner" id="netBanner" data-show="0" role="status" aria-live="polite">
+        <span class="netbanner__spin" aria-hidden="true"></span>
+        <span class="netbanner__text" id="netBannerText">Waiting to reconnect…</span>
+        <button type="button" class="btn btn--sm" id="netRetryBtn">Retry</button>
+        <button type="button" class="btn btn--sm" id="netEndBtn">End game</button>
       </div>
 
       <div class="board-frame">
@@ -98,6 +110,21 @@
             </button>
             <button type="button" class="btn" id="newBtn">Restart</button>
           </div>
+          <button type="button" class="btn btn--block btn--sm btn--danger" id="resignBtn" hidden>Resign</button>
+        </div>
+      </section>
+
+      <section class="panel panel--chat" id="chatPanel" hidden>
+        <h2 class="panel__head">Chat</h2>
+        <div class="panel__body">
+          <ol class="chat__log" id="chatLog" aria-label="Chat messages" aria-live="polite"></ol>
+          <p class="chat__empty" id="chatEmpty">Say hello. Messages are not saved.</p>
+          <form class="chat__form" id="chatForm">
+            <label class="visually-hidden" for="chatInput">Message to your friend</label>
+            <input class="chat__input" id="chatInput" type="text" maxlength="200" autocomplete="off"
+                   placeholder="Message…" enterkeyhint="send">
+            <button type="submit" class="btn btn--sm btn--primary" id="chatSend">Send</button>
+          </form>
         </div>
       </section>
 

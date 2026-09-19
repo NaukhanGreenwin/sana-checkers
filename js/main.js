@@ -8,9 +8,12 @@ import {
   RC, colorOf, isKing, opponent,
   initialState, generateMoves, applyMove, gameStatus,
   countMaterial, notation, KING_MOVE_DRAW_LIMIT,
+  boardToString, boardFromString,
 } from './rules.js';
 import { chooseMove, DIFFICULTIES } from './ai.js';
 import { sfx, setEnabled as setSound, isEnabled as soundOn } from './sound.js';
+import * as online from './online.js';
+import { net } from './online.js';
 
 /* ------------------------------------------------------------------ */
 /* Elements                                                            */
@@ -35,6 +38,18 @@ const modal = $('#modal');
 const modalBody = $('#modalBody');
 const confettiEl = $('#confetti');
 const statusLive = $('#statusLive');
+const netPill = $('#netPill');
+const netPillText = $('#netPillText');
+const netBanner = $('#netBanner');
+const netBannerText = $('#netBannerText');
+const netRetryBtn = $('#netRetryBtn');
+const netEndBtn = $('#netEndBtn');
+const resignBtn = $('#resignBtn');
+const chatPanel = $('#chatPanel');
+const chatLog = $('#chatLog');
+const chatEmpty = $('#chatEmpty');
+const chatForm = $('#chatForm');
+const chatInput = $('#chatInput');
 
 const LABEL = { [BLACK]: 'Black', [RED]: 'Red' };
 const STORE = 'checkers.prefs.v1';
@@ -47,7 +62,7 @@ const app = {
   state: initialState(),
   history: [],          // { state, move, turn } snapshots BEFORE each move
   moveLog: [],          // notation strings
-  mode: 'ai',           // 'ai' | 'local'
+  mode: 'ai',           // 'ai' | 'local' | 'online'
   difficulty: 'medium',
   humanSide: BLACK,
   selected: null,       // square index
@@ -58,6 +73,8 @@ const app = {
   cursor: 11,           // keyboard cursor square
   lastMove: null,
   showHints: true,
+  paused: false,        // online: connection down, board frozen
+  resigned: null,       // online: colour that resigned
 };
 
 /* ------------------------------------------------------------------ */
@@ -84,7 +101,7 @@ function savePrefs() {
       coords: document.documentElement.dataset.coords,
       sound: soundOn(),
       showHints: app.showHints,
-      mode: app.mode,
+      mode: app.mode === 'online' ? 'local' : app.mode,
       difficulty: app.difficulty,
     }));
   } catch { /* private mode — ignore */ }
@@ -336,6 +353,9 @@ function renderScore() {
 }
 
 function playerName(side) {
+  if (app.mode === 'online') {
+    return side === net.color ? `${LABEL[side]} (You)` : `${LABEL[side]} (Friend)`;
+  }
   if (app.mode === 'local') return LABEL[side];
   return side === app.humanSide ? `${LABEL[side]} (You)` : `${LABEL[side]} (${DIFFICULTIES[app.difficulty].label} AI)`;
 }
@@ -378,9 +398,13 @@ function renderTurnbar() {
     return;
   }
   const mine = humanToMove();
-  turnTextEl.textContent = app.mode === 'local'
-    ? `${LABEL[app.state.turn]} to move`
-    : (mine ? 'Your move' : `${DIFFICULTIES[app.difficulty].label} AI to move`);
+  if (app.mode === 'online') {
+    turnTextEl.textContent = app.paused ? 'Game paused' : (mine ? 'Your move' : "Your friend's turn");
+  } else {
+    turnTextEl.textContent = app.mode === 'local'
+      ? `${LABEL[app.state.turn]} to move`
+      : (mine ? 'Your move' : `${DIFFICULTIES[app.difficulty].label} AI to move`);
+  }
 
   const caps = app.legal.some((m) => m.capture);
   let hint = `${app.legal.length} legal ${app.legal.length === 1 ? 'move' : 'moves'}`;
@@ -388,6 +412,7 @@ function renderTurnbar() {
   if (app.state.kingMoves >= KING_MOVE_DRAW_LIMIT - 8) {
     hint = `Draw in ${KING_MOVE_DRAW_LIMIT - app.state.kingMoves} king moves`;
   }
+  if (app.mode === 'online' && app.paused) hint = 'Connection lost';
   turnHintEl.textContent = hint;
 }
 
@@ -404,7 +429,11 @@ function renderAll() {
   renderScore();
   renderHistory();
   renderTurnbar();
-  undoBtn.disabled = app.busy || !app.history.length || (app.mode === 'ai' && !humanToMove() && !app.over);
+  if (app.mode === 'online') {
+    undoBtn.disabled = app.busy || app.over || app.paused || !net.connected || !app.history.length;
+  } else {
+    undoBtn.disabled = app.busy || !app.history.length || (app.mode === 'ai' && !humanToMove() && !app.over);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -412,6 +441,7 @@ function renderAll() {
 /* ------------------------------------------------------------------ */
 
 function humanToMove() {
+  if (app.mode === 'online') return net.started && !app.paused && !net.pending && app.state.turn === net.color;
   return app.mode === 'local' || app.state.turn === app.humanSide;
 }
 
@@ -475,8 +505,9 @@ function queueAI() {
 
 function finish(status) {
   const humanWon = app.mode === 'ai' && status.winner === app.humanSide;
+  const onlineWon = app.mode === 'online' && status.winner === net.color;
   if (status.winner === null) sfx.lose();
-  else if (app.mode === 'local' || humanWon) sfx.win();
+  else if (app.mode === 'local' || humanWon || onlineWon) sfx.win();
   else sfx.lose();
 
   let title, detail;
@@ -485,15 +516,23 @@ function finish(status) {
     detail = `Neither side made progress for ${KING_MOVE_DRAW_LIMIT} king moves.`;
   } else {
     const w = LABEL[status.winner];
-    title = app.mode === 'local'
-      ? `${w} wins`
-      : (humanWon ? 'You win' : `${DIFFICULTIES[app.difficulty].label} AI wins`);
-    detail = status.reason === 'captured'
-      ? `${w} captured every opposing piece in ${app.moveLog.length} moves.`
-      : `${LABEL[opponent(status.winner)]} has no legal move left.`;
+    if (app.mode === 'online') {
+      title = onlineWon ? 'You win' : 'Your friend wins';
+    } else {
+      title = app.mode === 'local'
+        ? `${w} wins`
+        : (humanWon ? 'You win' : `${DIFFICULTIES[app.difficulty].label} AI wins`);
+    }
+    if (status.reason === 'resigned') {
+      detail = onlineWon ? 'Your friend resigned.' : 'You resigned.';
+    } else {
+      detail = status.reason === 'captured'
+        ? `${w} captured every opposing piece in ${app.moveLog.length} moves.`
+        : `${LABEL[opponent(status.winner)]} has no legal move left.`;
+    }
   }
   announce(`Game over. ${title}. ${detail}`);
-  if (status.winner !== null && (app.mode === 'local' || humanWon)) burstConfetti();
+  if (status.winner !== null && (app.mode === 'local' || humanWon || onlineWon)) burstConfetti();
   showResult(title, detail);
 }
 
@@ -525,7 +564,17 @@ function onSquare(sq) {
   if (app.over || app.busy || !humanToMove()) return;
 
   const mv = app.targets.get(sq);
-  if (mv) { commitMove(mv); return; }
+  if (mv) {
+    if (app.mode === 'online') {
+      app.selected = null;
+      // Host applies immediately; guest posts an intent and waits for the ruling.
+      if (!online.localMove(mv)) renderAll();
+      else if (net.role === 'guest') { clearMarks(); renderAll(); }
+    } else {
+      commitMove(mv);
+    }
+    return;
+  }
 
   const code = app.state.board[sq];
   if (code !== EMPTY && colorOf(code) === app.state.turn) {
@@ -571,6 +620,9 @@ function onKey(e) {
     if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
     return;
   }
+  // Never steal keys from a text field (chat, room code).
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
   const k = e.key;
   if (k === 'ArrowUp') { e.preventDefault(); moveCursor(-1, 0); }
   else if (k === 'ArrowDown') { e.preventDefault(); moveCursor(1, 0); }
@@ -593,23 +645,38 @@ function onKey(e) {
 
 function undo() {
   if (app.busy || !app.history.length) return;
+
+  if (app.mode === 'online') {
+    if (!net.connected || app.over) return;
+    if (online.requestUndo()) {
+      undoBtn.disabled = true;
+      announce('Undo requested. Waiting for your friend.');
+      netNotice('Undo requested — waiting for your friend…');
+    }
+    return;
+  }
+
   // In AI mode, roll back a full round-trip so it is the human's turn again.
   const steps = (app.mode === 'ai' && app.history.length >= 2 && !app.over) ? 2 : 1;
-  for (let i = 0; i < steps; i++) {
+  rollback(steps);
+  if (app.mode === 'ai' && app.history.length && app.state.turn !== app.humanSide) rollback(1);
+  finishUndo();
+}
+
+/** Pop `n` plies off the history. Pure state surgery, no rendering. */
+function rollback(n) {
+  for (let i = 0; i < n; i++) {
     const prev = app.history.pop();
     if (!prev) break;
     app.state = prev.state;
     app.lastMove = prev.lastMove;
     app.moveLog.pop();
   }
-  // If we landed on the AI's turn (e.g. after undoing a single ply), go back one more.
-  if (app.mode === 'ai' && app.history.length && app.state.turn !== app.humanSide) {
-    const prev = app.history.pop();
-    app.state = prev.state;
-    app.lastMove = prev.lastMove;
-    app.moveLog.pop();
-  }
+}
+
+function finishUndo() {
   app.over = false;
+  app.resigned = null;
   app.selected = null;
   turnbarEl.dataset.thinking = '0';
   renderPiecesFresh();
@@ -639,6 +706,8 @@ function closeModal() {
 }
 
 function openNewGame() {
+  if (app.mode === 'online' && net.active) { confirmOnlineRestart(); return; }
+  const localMode = app.mode === 'online' ? 'local' : app.mode;
   openModal(`
     <div>
       <h2 class="modal__title" id="modalTitle">New game</h2>
@@ -647,23 +716,30 @@ function openNewGame() {
     <div class="field">
       <span class="field__label" id="lblMode">Mode</span>
       <div class="seg" role="radiogroup" aria-labelledby="lblMode" id="segMode">
-        <button type="button" class="seg__btn" role="radio" data-v="ai" aria-checked="${app.mode === 'ai'}">vs Computer</button>
-        <button type="button" class="seg__btn" role="radio" data-v="local" aria-checked="${app.mode === 'local'}">Two players</button>
+        <button type="button" class="seg__btn" role="radio" data-v="ai" aria-checked="${localMode === 'ai'}">vs Computer</button>
+        <button type="button" class="seg__btn" role="radio" data-v="local" aria-checked="${localMode === 'local'}">Two players</button>
       </div>
     </div>
-    <div class="field" id="diffField" ${app.mode === 'local' ? 'hidden' : ''}>
+    <div class="field" id="diffField" ${localMode === 'local' ? 'hidden' : ''}>
       <span class="field__label" id="lblDiff">Difficulty</span>
       <div class="seg" role="radiogroup" aria-labelledby="lblDiff" id="segDiff">
         ${Object.entries(DIFFICULTIES).map(([k, v]) =>
           `<button type="button" class="seg__btn" role="radio" data-v="${k}" aria-checked="${app.difficulty === k}">${v.label}</button>`).join('')}
       </div>
     </div>
-    <div class="field" id="sideField" ${app.mode === 'local' ? 'hidden' : ''}>
+    <div class="field" id="sideField" ${localMode === 'local' ? 'hidden' : ''}>
       <span class="field__label" id="lblSide">You play</span>
       <div class="seg" role="radiogroup" aria-labelledby="lblSide" id="segSide">
         <button type="button" class="seg__btn" role="radio" data-v="b" aria-checked="${app.humanSide === BLACK}">Black · first</button>
         <button type="button" class="seg__btn" role="radio" data-v="r" aria-checked="${app.humanSide === RED}">Red · second</button>
       </div>
+    </div>
+    <div class="field">
+      <span class="field__label">Or play over the internet</span>
+      <button type="button" class="choice" id="onlineBtn">
+        <span class="choice__title">Play online</span>
+        <span class="choice__sub">Share a room link and play a friend anywhere.</span>
+      </button>
     </div>
     <div class="actions">
       <button type="button" class="btn" id="cancelBtn">Cancel</button>
@@ -680,6 +756,7 @@ function openNewGame() {
     });
   };
   const $m = (s) => modalBody.querySelector(s);
+  app.mode = localMode;
   pick($m('#segMode'), (v) => {
     app.mode = v;
     $m('#diffField').hidden = v === 'local';
@@ -687,8 +764,9 @@ function openNewGame() {
   });
   pick($m('#segDiff'), (v) => { app.difficulty = v; });
   pick($m('#segSide'), (v) => { app.humanSide = v === 'b' ? BLACK : RED; });
+  $m('#onlineBtn').addEventListener('click', openOnlineChoice);
   $m('#cancelBtn').addEventListener('click', closeModal);
-  $m('#startBtn').addEventListener('click', () => { closeModal(); startGame(); });
+  $m('#startBtn').addEventListener('click', () => { closeModal(); leaveOnline(); startGame(); });
 }
 
 function showResult(title, detail) {
@@ -709,10 +787,473 @@ function showResult(title, detail) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Online — modals, status chrome and the controller bridge            */
+/* ------------------------------------------------------------------ */
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function openOnlineChoice() {
+  openModal(`
+    <div>
+      <h2 class="modal__title" id="modalTitle">Play online</h2>
+      <p class="modal__sub">One of you creates a room and shares the link. No accounts, nothing saved.</p>
+    </div>
+    <div class="field">
+      <button type="button" class="choice" id="createBtn">
+        <span class="choice__title">Create a room</span>
+        <span class="choice__sub">You play red and move first.</span>
+      </button>
+      <button type="button" class="choice" id="joinBtn">
+        <span class="choice__title">Join a room</span>
+        <span class="choice__sub">Enter the 6-character code your friend sent.</span>
+      </button>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="backBtn">Back</button>
+    </div>
+  `);
+  const $m = (s) => modalBody.querySelector(s);
+  $m('#createBtn').addEventListener('click', openCreateRoom);
+  $m('#joinBtn').addEventListener('click', () => openJoinRoom(''));
+  $m('#backBtn').addEventListener('click', openNewGame);
+}
+
+function openCreateRoom() {
+  openModal(`
+    <div>
+      <h2 class="modal__title" id="modalTitle">Create a room</h2>
+      <p class="modal__sub">Claiming a room code…</p>
+    </div>
+    <div class="waitrow"><span class="spinner" aria-hidden="true"></span><span>Connecting…</span></div>
+    <div class="actions">
+      <button type="button" class="btn" id="backBtn">Cancel</button>
+      <span></span>
+    </div>
+  `);
+  modalBody.querySelector('#backBtn').addEventListener('click', () => { online.leave(); openOnlineChoice(); });
+
+  online.createRoom().then(({ code, link }) => {
+    if (!net.active) return;
+    app.mode = 'online';
+    openModal(`
+      <div>
+        <h2 class="modal__title" id="modalTitle">Your room is open</h2>
+        <p class="modal__sub">Send your friend the link. The game starts the moment they join.</p>
+      </div>
+      <div class="field">
+        <span class="field__label">Room code</span>
+        <p class="roomcode" id="roomCode">${esc(code)}</p>
+      </div>
+      <div class="field">
+        <label class="field__label" for="roomLink">Shareable link</label>
+        <input class="roomlink" id="roomLink" type="text" readonly value="${esc(link)}"
+               aria-label="Shareable room link">
+      </div>
+      <button type="button" class="btn btn--primary btn--block" id="copyBtn">Copy link</button>
+      <div class="waitrow" id="waitRow">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>Waiting for your friend…</span>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn" id="cancelRoomBtn">Cancel room</button>
+        <span></span>
+      </div>
+    `);
+    const $m = (s) => modalBody.querySelector(s);
+    const copyBtn = $m('#copyBtn');
+    copyBtn.addEventListener('click', async () => {
+      const input = $m('#roomLink');
+      let done = false;
+      try {
+        if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(link); done = true; }
+      } catch { /* fall through to selection */ }
+      if (!done) {
+        input.focus();
+        input.setSelectionRange(0, input.value.length);
+        try { done = document.execCommand('copy'); } catch { done = false; }
+      }
+      copyBtn.textContent = done ? 'Link copied' : 'Press ⌘C to copy';
+      announce(done ? 'Room link copied to the clipboard.' : 'Select the link and copy it.');
+      setTimeout(() => { copyBtn.textContent = 'Copy link'; }, 2200);
+    });
+    $m('#cancelRoomBtn').addEventListener('click', () => { online.leave(); app.mode = 'local'; openNewGame(); });
+    netStatus();
+  }).catch((err) => {
+    showOnlineError('Create a room', err.message, openOnlineChoice);
+  });
+}
+
+function openJoinRoom(prefill) {
+  openModal(`
+    <div>
+      <h2 class="modal__title" id="modalTitle">Join a room</h2>
+      <p class="modal__sub">Enter the 6-character code your friend sent you.</p>
+    </div>
+    <div class="field">
+      <label class="field__label" for="codeInput">Room code</label>
+      <input class="codeinput" id="codeInput" type="text" inputmode="latin" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" maxlength="6" placeholder="ABC123"
+             value="${esc(online.normaliseCode(prefill))}">
+      <p class="modal__err" id="joinErr" role="alert"></p>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="backBtn">Back</button>
+      <button type="button" class="btn btn--primary" id="connectBtn">Connect</button>
+    </div>
+  `);
+  const $m = (s) => modalBody.querySelector(s);
+  const input = $m('#codeInput');
+  const errEl = $m('#joinErr');
+  const connectBtn = $m('#connectBtn');
+
+  input.addEventListener('input', () => {
+    const c = online.normaliseCode(input.value);
+    if (input.value !== c) input.value = c;
+    errEl.textContent = '';
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); connectBtn.click(); } });
+
+  connectBtn.addEventListener('click', () => {
+    const code = online.normaliseCode(input.value);
+    if (!online.isValidCode(code)) { errEl.textContent = 'A room code is 6 letters and numbers.'; input.focus(); return; }
+    connectBtn.disabled = true;
+    input.disabled = true;
+    errEl.textContent = '';
+    openModal(`
+      <div>
+        <h2 class="modal__title" id="modalTitle">Joining ${esc(code)}</h2>
+        <p class="modal__sub">Connecting to your friend…</p>
+      </div>
+      <div class="waitrow"><span class="spinner" aria-hidden="true"></span><span>Handshaking…</span></div>
+      <div class="actions">
+        <button type="button" class="btn" id="abortBtn">Cancel</button>
+        <span></span>
+      </div>
+    `);
+    modalBody.querySelector('#abortBtn').addEventListener('click', () => { online.leave(); openJoinRoom(code); });
+
+    online.joinRoom(code).then(() => {
+      app.mode = 'online';
+      netStatus();
+    }).catch((err) => {
+      online.leave(true);
+      showOnlineError('Join a room', err.message, () => openJoinRoom(code));
+    });
+  });
+
+  // Pre-filled from ?room= — put the caret on Connect so Enter just works.
+  setTimeout(() => {
+    if (online.isValidCode(input.value)) connectBtn.focus();
+    else input.focus();
+  }, 80);
+}
+
+function showOnlineError(title, message, retry) {
+  openModal(`
+    <div>
+      <h2 class="modal__title" id="modalTitle">${esc(title)}</h2>
+      <p class="modal__sub">${esc(message || 'Something went wrong.')}</p>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="backBtn">Back</button>
+      <button type="button" class="btn btn--primary" id="retryBtn">Try again</button>
+    </div>
+  `);
+  modalBody.querySelector('#backBtn').addEventListener('click', () => { app.mode = 'local'; openNewGame(); });
+  modalBody.querySelector('#retryBtn').addEventListener('click', retry);
+}
+
+function confirmDialog(title, sub, okLabel, onAnswer, timeoutMs) {
+  let answered = false;
+  let timer = null;
+  const settle = (v) => {
+    if (answered) return;
+    answered = true;
+    clearTimeout(timer);
+    closeModal();
+    onAnswer(v);
+  };
+  openModal(`
+    <div>
+      <h2 class="modal__title" id="modalTitle">${esc(title)}</h2>
+      <p class="modal__sub">${esc(sub)}</p>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="noBtn">Decline</button>
+      <button type="button" class="btn btn--primary" id="yesBtn">${esc(okLabel)}</button>
+    </div>
+  `);
+  modalBody.querySelector('#noBtn').addEventListener('click', () => settle(false));
+  modalBody.querySelector('#yesBtn').addEventListener('click', () => settle(true));
+  if (timeoutMs) timer = setTimeout(() => settle(false), timeoutMs);
+}
+
+function confirmOnlineRestart() {
+  confirmDialog(
+    'Start a new game?',
+    'Your friend has to agree before the board resets.',
+    'Ask my friend',
+    (yes) => {
+      if (!yes) return;
+      if (online.requestNewGame()) netNotice('New game requested — waiting for your friend…');
+    },
+  );
+}
+
+function confirmResign() {
+  confirmDialog('Resign this game?', 'Your friend wins immediately. This cannot be undone.', 'Resign', (yes) => {
+    if (!yes) return;
+    online.resign();
+    app.over = true;
+    app.resigned = net.color;
+    renderAll();
+    finish({ over: true, winner: net.color === BLACK ? RED : BLACK, reason: 'resigned', moves: [] });
+  });
+}
+
+/* --- status chrome --- */
+
+function netStatus() {
+  const on = app.mode === 'online' && net.active;
+  netPill.dataset.show = on ? '1' : '0';
+  resignBtn.hidden = !on || app.over;
+  chatPanel.hidden = !on;
+  if (!on) { netBanner.dataset.show = '0'; return; }
+
+  let state = 'wait';
+  let text = 'Waiting for your friend…';
+  if (net.connected && net.started) {
+    state = 'live';
+    const yours = LABEL[net.color];
+    text = `Connected · you are ${yours.toLowerCase()}`;
+  } else if (!net.connected && net.started) {
+    state = 'down';
+    text = 'Waiting for your friend to reconnect…';
+  } else if (net.code) {
+    text = `Room ${net.code} · waiting for your friend…`;
+  }
+  netPill.dataset.state = state;
+  netPillText.textContent = text;
+  chatInput.disabled = !net.connected;
+}
+
+function netNotice(msg) {
+  announce(msg);
+  addChatLine(msg, 'sys');
+}
+
+function showBanner(text, showRetry) {
+  netBannerText.textContent = text;
+  netRetryBtn.hidden = !showRetry;
+  netBanner.dataset.show = '1';
+}
+
+function hideBanner() { netBanner.dataset.show = '0'; }
+
+function addChatLine(text, kind) {
+  const li = document.createElement('li');
+  if (kind === 'sys') {
+    li.className = 'chat__msg';
+    li.style.background = 'transparent';
+    li.style.color = 'var(--ink-faint)';
+    li.style.fontSize = '12px';
+    li.style.padding = '2px 0';
+    li.style.maxWidth = '100%';
+    li.textContent = text;
+  } else {
+    li.className = `chat__msg${kind === 'me' ? ' chat__msg--me' : ''}`;
+    const who = document.createElement('span');
+    who.className = 'chat__who';
+    who.textContent = kind === 'me' ? 'You' : 'Friend';
+    li.appendChild(who);
+    li.appendChild(document.createTextNode(text));
+  }
+  chatLog.appendChild(li);
+  while (chatLog.children.length > 60) chatLog.removeChild(chatLog.firstChild);
+  chatEmpty.hidden = true;
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function leaveOnline() {
+  if (net.active) online.leave();
+  hideBanner();
+  netPill.dataset.show = '0';
+  resignBtn.hidden = true;
+  chatPanel.hidden = true;
+  chatLog.innerHTML = '';
+  chatEmpty.hidden = false;
+  app.paused = false;
+  app.resigned = null;
+}
+
+/** The bridge the network module drives. Every entry point is UI-only. */
+online.attach({
+  getState: () => app.state,
+  isOver: () => app.over,
+
+  snapshot: () => ({
+    board: Array.from(app.state.board),
+    turn: app.state.turn,
+    kingMoves: app.state.kingMoves,
+    ply: app.state.ply,
+    moveLog: app.moveLog.slice(),
+    over: app.over,
+  }),
+
+  restore(snap) {
+    if (!snap || !Array.isArray(snap.board) || snap.board.length !== 32) return;
+    app.state = {
+      board: Int8Array.from(snap.board.map((v) => (Number.isInteger(v) && v >= 0 && v <= 4 ? v : 0))),
+      turn: snap.turn === RED ? RED : BLACK,
+      kingMoves: Number.isInteger(snap.kingMoves) ? snap.kingMoves : 0,
+      ply: Number.isInteger(snap.ply) ? snap.ply : 0,
+    };
+    app.moveLog = Array.isArray(snap.moveLog) ? snap.moveLog.filter((s) => typeof s === 'string').slice(0, 400) : [];
+    app.history = [];
+    app.selected = null;
+    app.lastMove = null;
+    app.over = !!snap.over;
+    app.busy = false;
+    renderPiecesFresh();
+    renderAll();
+  },
+
+  applyMove: (mv) => commitMove(mv),
+
+  undoStepsFor(requester) {
+    // Roll back to just before that player's most recent move.
+    for (let i = app.history.length - 1, n = 1; i >= 0; i--, n++) {
+      if (app.history[i].state.turn === requester) return n;
+    }
+    return 0;
+  },
+
+  undoPlies(n) {
+    rollback(n);
+    finishUndo();
+    netStatus();
+  },
+
+  netStart(color) {
+    app.mode = 'online';
+    net.color = color;
+    closeModal();
+    hideBanner();
+    app.paused = false;
+    app.resigned = null;
+    app.state = initialState();
+    app.history = [];
+    app.moveLog = [];
+    app.selected = null;
+    app.lastMove = null;
+    app.over = false;
+    app.busy = false;
+    app.cursor = color === BLACK ? 11 : 20;
+    turnbarEl.dataset.thinking = '0';
+    confettiEl.innerHTML = '';
+    chatLog.innerHTML = '';
+    chatEmpty.hidden = false;
+    renderPiecesFresh();
+    renderAll();
+    netStatus();
+    announce(`Connected. You are ${LABEL[color]}. ${color === BLACK ? 'Your move.' : "Your friend moves first."}`);
+    sfx.select();
+  },
+
+  netRestart() {
+    closeModal();
+    app.state = initialState();
+    app.history = [];
+    app.moveLog = [];
+    app.selected = null;
+    app.lastMove = null;
+    app.over = false;
+    app.busy = false;
+    app.paused = false;
+    app.resigned = null;
+    turnbarEl.dataset.thinking = '0';
+    confettiEl.innerHTML = '';
+    renderPiecesFresh();
+    renderAll();
+    netStatus();
+    announce('New game. Black moves first.');
+  },
+
+  netStatus,
+
+  netInterrupted() {
+    app.paused = true;
+    showBanner('Your friend dropped out. Waiting to reconnect…', true);
+    renderAll();
+    netStatus();
+  },
+
+  netResumed() {
+    app.paused = false;
+    hideBanner();
+    renderAll();
+    netStatus();
+    announce('Reconnected. Game resumed.');
+  },
+
+  netGaveUp() {
+    showBanner('Could not reconnect. The session has ended.', false);
+    app.paused = true;
+    renderAll();
+  },
+
+  netEnded(reason) {
+    app.paused = false;
+    hideBanner();
+    netPill.dataset.show = '0';
+    resignBtn.hidden = true;
+    if (reason) {
+      announce(reason);
+      showOnlineError('Game ended', reason, openOnlineChoice);
+    }
+    app.mode = 'local';
+  },
+
+  netNotice,
+
+  askUndo(answer) {
+    confirmDialog('Undo requested', 'Your friend wants to take their move back.', 'Allow undo', answer, online.UNDO_TIMEOUT_MS);
+  },
+
+  undoAnswered(ok, timedOut) {
+    netNotice(ok ? 'Your friend allowed the undo.' : (timedOut ? 'No answer — undo cancelled.' : 'Your friend declined the undo.'));
+    renderAll();
+  },
+
+  askNew(answer) {
+    confirmDialog('New game?', 'Your friend wants to start over.', 'Start over', answer, online.UNDO_TIMEOUT_MS);
+  },
+
+  newAnswered(ok) {
+    if (!ok) netNotice('Your friend would rather keep playing.');
+  },
+
+  peerResigned(color) {
+    app.over = true;
+    app.resigned = color;
+    renderAll();
+    netStatus();
+    finish({ over: true, winner: color === BLACK ? RED : BLACK, reason: 'resigned', moves: [] });
+  },
+
+  chatIn(text, mine) {
+    addChatLine(text, mine ? 'me' : 'them');
+    if (!mine) sfx.select();
+  },
+});
+
+/* ------------------------------------------------------------------ */
 /* Lifecycle                                                           */
 /* ------------------------------------------------------------------ */
 
 function startGame() {
+  leaveOnline();
   app.state = initialState();
   app.history = [];
   app.moveLog = [];
@@ -736,6 +1277,19 @@ function wire() {
   newBtn.addEventListener('click', openNewGame);
   menuBtn.addEventListener('click', openNewGame);
   undoBtn.addEventListener('click', undo);
+  resignBtn.addEventListener('click', confirmResign);
+  netEndBtn.addEventListener('click', () => { leaveOnline(); app.mode = 'local'; startGame(); });
+  netRetryBtn.addEventListener('click', () => {
+    online.retryConnection();
+    netBannerText.textContent = 'Retrying…';
+  });
+
+  chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    if (online.sendChat(text)) chatInput.value = '';
+  });
 
   hintBtn.addEventListener('click', () => {
     app.showHints = !app.showHints;
@@ -794,7 +1348,45 @@ function init() {
   renderPiecesFresh();
   renderAll();
   document.body.classList.toggle('no-hints', !app.showHints);
+
+  // ?room=ABC123 — open Join with the code filled in and Connect focused.
+  const invited = online.codeFromUrl();
+  if (invited) setTimeout(() => openJoinRoom(invited), 120);
 }
+
+window.addEventListener('beforeunload', () => { if (net.active) online.leave(); });
+
+/**
+ * Test hook. Everything here is reachable from the page's own console anyway,
+ * so exposing it changes no trust boundary: the host still validates every
+ * move it is handed, whatever the source.
+ */
+window.__chk = {
+  board: () => boardToString(app.state.board),
+  turn: () => app.state.turn,
+  ply: () => app.state.ply,
+  hash: () => online.hashState(app.state),
+  legal: () => app.legal.map((m) => ({ from: m.from, to: m.to, capture: m.capture, crowned: m.crowned })),
+  over: () => app.over,
+  mode: () => app.mode,
+  net: () => ({ ...net }),
+  /** Host-only: install a position and push it to the guest. */
+  seed(str, turn) {
+    if (net.active && net.role !== 'host') return false;
+    app.state = { board: boardFromString(str), turn: turn === RED ? RED : BLACK, kingMoves: 0, ply: 0 };
+    app.history = [];
+    app.moveLog = [];
+    app.lastMove = null;
+    app.selected = null;
+    app.over = false;
+    renderPiecesFresh();
+    renderAll();
+    if (net.active) online.pushState();
+    return true;
+  },
+  /** Inject a raw frame as if it arrived from the peer. */
+  raw: (s) => online.injectRaw(s),
+};
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();

@@ -651,6 +651,189 @@ button { font: inherit; color: inherit; }
 .result__title { font-size: 22px; letter-spacing: -0.026em; }
 .result__detail { font-size: 13.5px; color: var(--ink-muted); margin: 0; }
 
+/* ------------------------------------------------------------------ */
+/* Online play                                                         */
+/* ------------------------------------------------------------------ */
+
+.btn--danger { border-color: color-mix(in oklab, var(--red-piece) 55%, var(--border-strong)); color: var(--red-rim); }
+.btn--danger:hover:not(:disabled) { background: color-mix(in oklab, var(--red-piece) 16%, var(--surface-2)); border-color: var(--red-rim); }
+
+/* --- header connection pill --- */
+.netpill {
+  display: none; align-items: center; gap: 7px;
+  margin: 0 auto 0 4px;
+  min-height: 30px; padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px; font-weight: 550; letter-spacing: -0.005em;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  max-width: 44vw;
+}
+.netpill[data-show='1'] { display: inline-flex; }
+.netpill__dot {
+  width: 7px; height: 7px; flex: none; border-radius: 50%;
+  background: var(--ink-faint);
+}
+.netpill[data-state='live'] .netpill__dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ok) 22%, transparent); }
+.netpill[data-state='wait'] .netpill__dot { background: var(--warn); animation: netPulse 1.5s var(--ease) infinite; }
+.netpill[data-state='down'] .netpill__dot { background: var(--red-piece); animation: netPulse 1.2s var(--ease) infinite; }
+@keyframes netPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.32; } }
+
+/* --- reconnect banner above the board --- */
+.netbanner {
+  display: none; align-items: center; gap: 10px;
+  width: min(100%, 720px);
+  margin: 0 auto 10px;
+  padding: 10px 13px;
+  border: 1px solid color-mix(in oklab, var(--warn) 42%, var(--border));
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--warn) 11%, var(--surface));
+  font-size: 13px;
+}
+.netbanner[data-show='1'] { display: flex; }
+.netbanner__text { flex: 1 1 auto; min-width: 0; color: var(--ink); }
+.netbanner .btn { flex: none; }
+
+.netbanner__spin, .spinner {
+  width: 15px; height: 15px; flex: none;
+  border: 2px solid color-mix(in oklab, var(--ink-faint) 45%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 780ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- room code + link --- */
+.roomcode {
+  display: flex; align-items: center; justify-content: center; gap: 3px;
+  padding: 13px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: clamp(22px, 8vw, 30px);
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+  color: var(--accent);
+  user-select: all;
+  word-break: break-all;
+}
+
+.roomlink {
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--ink-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+.roomlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.waitrow {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--ink-muted);
+}
+
+.codeinput {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 20px; font-weight: 650;
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.codeinput::placeholder { color: var(--ink-faint); letter-spacing: 0.18em; font-weight: 500; }
+.codeinput:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.modal__err {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--red-rim);
+  min-height: 1em;
+}
+
+.choice {
+  display: grid; gap: 4px;
+  width: 100%;
+  min-height: 60px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.choice:hover { background: color-mix(in oklab, var(--surface-2) 70%, var(--ink) 8%); border-color: var(--ink-faint); }
+.choice__title { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
+.choice__sub { font-size: 12.5px; color: var(--ink-muted); }
+
+/* --- chat --- */
+.panel--chat .panel__body { display: grid; gap: 9px; }
+
+.chat__log {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 6px;
+  max-height: 190px; overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.chat__log:empty { display: none; }
+
+.chat__msg {
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  max-width: 92%;
+}
+.chat__msg--me { justify-self: end; background: var(--accent-soft); }
+.chat__who { display: block; font-size: 10.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+
+.chat__empty { margin: 0; font-size: 12.5px; color: var(--ink-faint); }
+
+.chat__form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.chat__input {
+  min-width: 0; min-height: 33px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit; font-size: 13px;
+}
+.chat__input::placeholder { color: var(--ink-faint); }
+.chat__input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (max-width: 720px) {
+  .netpill { max-width: 38vw; font-size: 11.5px; }
+  .chat__input { min-height: 44px; }
+  .chat__log { max-height: 150px; }
+  .netbanner { flex-wrap: wrap; }
+  .netbanner__text { flex-basis: 100%; }
+}
+
+@media (max-width: 380px) {
+  .netpill { display: none !important; }
+  .roomcode { font-size: 24px; letter-spacing: 0.1em; text-indent: 0.1em; padding: 11px 6px; }
+  .codeinput { font-size: 18px; letter-spacing: 0.14em; }
+}
+
 .confetti { position: fixed; inset: 0; pointer-events: none; z-index: 70; overflow: hidden; }
 .confetti i {
   position: absolute; top: -12px;
