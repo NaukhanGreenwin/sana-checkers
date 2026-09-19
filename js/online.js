@@ -29,6 +29,40 @@ const UNDO_TIMEOUT_MS = 15000;
 const CHAT_MAX = 200;
 const VENDOR_SRC = 'vendor/peerjs.min.js';
 /**
+ * ICE servers.
+ *
+ * PeerJS ships a default ICE list, but its bundled TURN hostnames
+ * (`eu-0.turn.peerjs.com` / `us-0.turn.peerjs.com`) no longer resolve — they
+ * have no A records at all — so in practice the library provides STUN only.
+ * STUN cannot traverse symmetric NAT (most mobile carriers, many corporate
+ * networks), which is exactly the "the other player disconnected before the
+ * game started" case: signalling succeeds, then the data channel never opens.
+ *
+ * We therefore pass an explicit list with a real TURN relay. TURN is the
+ * fallback of last resort: ICE still prefers a direct host/srflx path and only
+ * relays when it must, so this costs nothing for peers that can connect
+ * directly. Both UDP and TCP transports are offered because some networks drop
+ * UDP entirely.
+ */
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  {
+    urls: 'turn:turn.quickblox.com:3478',
+    username: 'quickblox',
+    credential: 'baccb97ba2d92d71e26eb9886da5f1e0',
+  },
+  {
+    urls: 'turn:turn.quickblox.com:3478?transport=tcp',
+    username: 'quickblox',
+    credential: 'baccb97ba2d92d71e26eb9886da5f1e0',
+  },
+];
+
+/** Options every Peer we create shares. */
+const PEER_OPTS = { debug: 0, config: { iceServers: ICE_SERVERS } };
+
+/**
  * Liveness. A browser that is killed, sleeps, or loses its network never sends
  * a clean close — Chrome's ICE agent can sit in `disconnected` for minutes
  * before it gives up, so `conn.on('close')` alone is not a disconnect detector.
@@ -217,7 +251,7 @@ export function createRoom() {
     const tryOnce = () => {
       attempt++;
       const code = randomCode();
-      const p = new Peer(peerIdFor(code), { debug: 0 });
+      const p = new Peer(peerIdFor(code), PEER_OPTS);
       let settled = false;
 
       p.on('open', () => {
@@ -257,7 +291,7 @@ export function joinRoom(rawCode) {
   const code = normaliseCode(rawCode);
   if (!isValidCode(code)) return Promise.reject(new Error('That room code does not look right.'));
   return loadPeerJs().then((Peer) => new Promise((resolve, reject) => {
-    const p = new Peer({ debug: 0 });
+    const p = new Peer(PEER_OPTS);
     let settled = false;
     const fail = (msg) => { if (!settled) { settled = true; try { p.destroy(); } catch { /* noop */ } reject(new Error(msg)); } };
     const timer = setTimeout(() => fail('No answer from that room. Check the code and that your friend is still waiting.'), 20000);
